@@ -10,6 +10,7 @@ from random import choices
 from typing import Any
 
 from rich.traceback import install
+from sqlalchemy import text
 
 from src.chat.emoji_system.emoji_manager import get_emoji_manager
 from src.chat.message_receive.message_handler import get_message_handler, shutdown_message_handler
@@ -19,6 +20,7 @@ from src.common.core_sink_manager import (
     initialize_core_sink_manager,
     shutdown_core_sink_manager,
 )
+from src.common.database.core import get_db_session
 from src.common.logger import get_logger
 from src.common.mem_monitor import (
     MEM_MONITOR_ENABLED,
@@ -339,6 +341,9 @@ class MainSystem:
         except Exception as e:
             logger.warning(f"配置数据库监控时出错: {e}")
 
+        # 自动创建关系场景表，避免新手手动迁移
+        await self._ensure_relationship_tables()
+
         # 初始化 CoreSinkManager（包含 MessageRuntime）
         logger.debug("正在初始化 CoreSinkManager...")
         self.core_sink_manager = await initialize_core_sink_manager()
@@ -363,6 +368,63 @@ class MainSystem:
             global_config.bot.nickname if global_config and global_config.bot else "Bot",
             selected_egg,
         )
+
+    async def _ensure_relationship_tables(self) -> None:
+        """启动时自动创建关系场景表（热兼容友好）。"""
+        db_type = "sqlite"
+        try:
+            if global_config and getattr(global_config, "database", None):
+                db_type = getattr(global_config.database, "database_type", "sqlite") or "sqlite"
+
+            ddl_sqlite = """
+            CREATE TABLE IF NOT EXISTS relationship_scene_facets (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              user_id TEXT NOT NULL,
+              platform TEXT,
+              scene_id TEXT,
+              scene_type TEXT NOT NULL DEFAULT 'group',
+              affinity_score REAL NOT NULL DEFAULT 0.3,
+              interaction_count INTEGER NOT NULL DEFAULT 0,
+              last_interaction_time REAL,
+              recent_topics TEXT,
+              recent_keywords TEXT,
+              sentiment_score REAL NOT NULL DEFAULT 0.0,
+              last_updated REAL NOT NULL DEFAULT (strftime('%s','now')),
+              created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              UNIQUE(user_id, scene_id, scene_type)
+            );
+            CREATE INDEX IF NOT EXISTS idx_relationship_facet_last_updated ON relationship_scene_facets(last_updated);
+            """
+
+            ddl_postgres = """
+            CREATE TABLE IF NOT EXISTS relationship_scene_facets (
+              id SERIAL PRIMARY KEY,
+              user_id TEXT NOT NULL,
+              platform TEXT,
+              scene_id TEXT,
+              scene_type TEXT NOT NULL DEFAULT 'group',
+              affinity_score REAL NOT NULL DEFAULT 0.3,
+              interaction_count INTEGER NOT NULL DEFAULT 0,
+              last_interaction_time DOUBLE PRECISION,
+              recent_topics TEXT,
+              recent_keywords TEXT,
+              sentiment_score REAL NOT NULL DEFAULT 0.0,
+              last_updated DOUBLE PRECISION NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW()),
+              created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+              UNIQUE(user_id, scene_id, scene_type)
+            );
+            CREATE INDEX IF NOT EXISTS idx_relationship_facet_last_updated ON relationship_scene_facets(last_updated);
+            """
+
+            ddl = ddl_postgres if db_type == "postgresql" else ddl_sqlite
+
+            async with get_db_session() as session:
+                for stmt in ddl.split(";"):
+                    if stmt.strip():
+                        await session.execute(text(stmt))
+            logger.info("✅ relationship_scene_facets 已确保存在 (db=%s)", db_type)
+        except Exception as exc:
+            logger.warning(f"自动创建 relationship_scene_facets 失败 (db={db_type}): {exc}")
 
     async def _init_components(self) -> None:
         """初始化其他组件"""

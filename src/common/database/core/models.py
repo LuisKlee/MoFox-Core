@@ -692,3 +692,40 @@ class UserRelationships(Base):
         Index("idx_relationship_updated", "last_updated"),
         Index("idx_relationship_stage", "relationship_stage"),
     )
+
+
+class RelationshipSceneFacet(Base):
+    """用户关系场景视图
+
+    用于在全局用户节点下记录群/私聊等不同场景的局部关系、兴趣与亲密度信息，避免跨场景割裂。
+    - user_id: 全局用户标识（跨群/私聊统一）
+    - scene_id: 场景标识（群号或私聊ID）
+    - scene_type: group/private/custom
+    - affinity_score: 场景内亲密度（0-1），与全局分数加权合并
+    - recent_topics/keywords: 最近主题或关键词（JSON/逗号分隔字符串）
+    - sentiment_score: 场景累计情感分（可正可负，供语气调节）
+    """
+
+    __tablename__ = "relationship_scene_facets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(get_string_field(100), nullable=False, index=True)
+    platform: Mapped[str | None] = mapped_column(get_string_field(50), nullable=True, index=True)
+    scene_id: Mapped[str | None] = mapped_column(get_string_field(100), nullable=True, index=True)
+    scene_type: Mapped[str] = mapped_column(get_string_field(20), nullable=False, default="group")
+
+    affinity_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.3)
+    interaction_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_interaction_time: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    recent_topics: Mapped[str | None] = mapped_column(Text, nullable=True)
+    recent_keywords: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sentiment_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+
+    last_updated: Mapped[float] = mapped_column(Float, nullable=False, default=time.time)
+    created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        Index("idx_relationship_facet_user_scene", "user_id", "scene_id", "scene_type", unique=True),
+        Index("idx_relationship_facet_last_updated", "last_updated"),
+    )

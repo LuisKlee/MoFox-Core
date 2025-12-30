@@ -111,7 +111,7 @@ class AffinityInterestCalculator(BaseInterestCalculator):
             logger.debug(f"[Affinity兴趣计算] 语义兴趣度（TF-IDF+LR）: {semantic_score}")
 
             # 2. 计算关系分
-            relationship_score = await self._calculate_relationship_score(user_id)
+            relationship_score = await self._calculate_relationship_score(user_id, message)
             logger.debug(f"[Affinity兴趣计算] 关系分: {relationship_score}")
 
             # 3. 计算提及分
@@ -185,7 +185,7 @@ class AffinityInterestCalculator(BaseInterestCalculator):
                 success=False, message_id=getattr(message, "message_id", ""), interest_value=0.0, error_message=str(e)
             )
 
-    async def _calculate_relationship_score(self, user_id: str) -> float:
+    async def _calculate_relationship_score(self, user_id: str, message: "DatabaseMessages") -> float:
         """计算用户关系分"""
         if not user_id:
             return global_config.affinity_flow.base_relationship_score
@@ -196,11 +196,20 @@ class AffinityInterestCalculator(BaseInterestCalculator):
             # 移除关系分上限，允许超过1.0，最终分数会被整体限制
             return relationship_value
 
-        # 如果内存中没有，尝试从统一的评分API获取
+        # 如果内存中没有，尝试从统一的评分API获取（携带场景上下文）
         try:
             from src.plugin_system.apis import person_api
 
-            relationship_data = await person_api.get_user_relationship_data(user_id)
+            scene_id = getattr(message, "chat_info_group_id", None) or getattr(message, "chat_info_stream_id", None)
+            scene_type = "group" if getattr(message, "chat_info_group_id", None) else "private"
+            platform = getattr(message, "chat_info_platform", None)
+
+            relationship_data = await person_api.get_user_relationship_data(
+                user_id,
+                scene_id=scene_id,
+                scene_type=scene_type,
+                platform=platform,
+            )
             if relationship_data:
                 relationship_score = relationship_data.get("relationship_score", global_config.affinity_flow.base_relationship_score)
                 # 同时更新内存缓存

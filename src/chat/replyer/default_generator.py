@@ -1910,8 +1910,19 @@ class DefaultReplyer:
 
                 user_info = await person_info_manager.get_values(person_id, ["user_id", "platform"])
                 user_id = user_info.get("user_id", "unknown")
+                scene_id = None
+                scene_type = "group" if self.chat_stream and self.chat_stream.group_info else "private"
+                if self.chat_stream and self.chat_stream.group_info and hasattr(self.chat_stream.group_info, "group_id"):
+                    scene_id = str(self.chat_stream.group_info.group_id)
+                elif self.chat_stream:
+                    scene_id = self.chat_stream.stream_id
 
-                relationship_data = await person_api.get_user_relationship_data(user_id)
+                relationship_data = await person_api.get_user_relationship_data(
+                    user_id,
+                    scene_id=scene_id,
+                    scene_type=scene_type,
+                    platform=user_info.get("platform"),
+                )
                 if relationship_data:
                     relationship_text = relationship_data.get("relationship_text", "")
                     relationship_score = relationship_data.get("relationship_score", 0.3)

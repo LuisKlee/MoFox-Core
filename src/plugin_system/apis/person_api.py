@@ -12,6 +12,7 @@ from typing import Any
 
 from src.common.logger import get_logger
 from src.person_info.person_info import PersonInfoManager, get_person_info_manager
+from src.plugin_system.services.relationship_profile_service import relationship_profile_service
 from src.plugin_system.services.relationship_service import relationship_service
 
 logger = get_logger("person_api")
@@ -145,35 +146,77 @@ async def get_person_points(person_id: str, limit: int = 5) -> list[tuple]:
 # =============================================================================
 
 
-async def get_user_relationship_score(user_id: str) -> float:
+async def get_user_relationship_score(
+    user_id: str,
+    *,
+    scene_id: str | None = None,
+    scene_type: str | None = None,
+    platform: str | None = None,
+) -> float:
     """
-    获取用户关系分
+    获取用户关系分，支持按场景融合
 
     Args:
         user_id: 用户ID
+        scene_id: 场景ID（群号/私聊ID，可选）
+        scene_type: 场景类型（group/private，可选）
+        platform: 平台（可选）
 
     Returns:
         关系分 (0.0 - 1.0)
     """
-    return await relationship_service.get_user_relationship_score(user_id)
+    try:
+        snapshot = await relationship_profile_service.get_snapshot(
+            user_id,
+            scene_id=scene_id,
+            scene_type=scene_type,
+            platform=platform,
+        )
+        return float(snapshot.get("relationship_score", 0.0))
+    except Exception as e:
+        logger.error(f"[PersonAPI] 获取聚合关系分失败，回退基础服务: user_id={user_id}, error={e}")
+        return await relationship_service.get_user_relationship_score(user_id)
 
 
-async def get_user_relationship_data(user_id: str) -> dict:
+async def get_user_relationship_data(
+    user_id: str,
+    *,
+    scene_id: str | None = None,
+    scene_type: str | None = None,
+    platform: str | None = None,
+) -> dict:
     """
-    获取用户完整关系数据
+    获取用户完整关系数据（聚合全局 + 场景）
 
     Args:
         user_id: 用户ID
+        scene_id: 场景ID（群号/私聊ID，可选）
+        scene_type: 场景类型（group/private，可选）
+        platform: 平台（可选）
 
     Returns:
-        包含关系分、关系文本等的字典
+        包含关系分、关系文本、场景信息等的字典
     """
-    return await relationship_service.get_user_relationship_data(user_id)
+    try:
+        return await relationship_profile_service.get_snapshot(
+            user_id,
+            scene_id=scene_id,
+            scene_type=scene_type,
+            platform=platform,
+        )
+    except Exception as e:
+        logger.error(f"[PersonAPI] 获取聚合关系数据失败，回退基础服务: user_id={user_id}, error={e}")
+        return await relationship_service.get_user_relationship_data(user_id)
 
 
-async def update_user_relationship(user_id: str, relationship_score: float, relationship_text: str | None = None, user_name: str | None = None):
+async def update_user_relationship(
+    user_id: str,
+    relationship_score: float,
+    relationship_text: str | None = None,
+    user_name: str | None = None,
+):
     """
-    更新用户关系数据
+    更新用户关系数据（全局记录，兼容旧逻辑）
 
     Args:
         user_id: 用户ID
@@ -182,6 +225,30 @@ async def update_user_relationship(user_id: str, relationship_score: float, rela
         user_name: 用户名称
     """
     await relationship_service.update_user_relationship(user_id, relationship_score, relationship_text, user_name)
+
+
+async def record_relationship_interaction(
+    user_id: str,
+    *,
+    scene_id: str | None = None,
+    scene_type: str | None = None,
+    platform: str | None = None,
+    score_delta: float = 0.0,
+    sentiment_delta: float = 0.0,
+    topics: list[str] | None = None,
+    keywords: list[str] | None = None,
+):
+    """记录一次交互，更新全局 + 场景关系"""
+    await relationship_profile_service.record_interaction(
+        user_id,
+        scene_id=scene_id,
+        scene_type=scene_type,
+        platform=platform,
+        score_delta=score_delta,
+        sentiment_delta=sentiment_delta,
+        topics=topics,
+        keywords=keywords,
+    )
 
 
 # =============================================================================

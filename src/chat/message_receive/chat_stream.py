@@ -303,7 +303,19 @@ class ChatStream:
 
             if self.user_info and hasattr(self.user_info, "user_id"):
                 user_id = str(self.user_info.user_id)
-                relationship_score = await person_api.get_user_relationship_score(user_id)
+                scene_id = None
+                scene_type = "group" if self.group_info else "private"
+                if self.group_info and hasattr(self.group_info, "group_id"):
+                    scene_id = str(self.group_info.group_id)
+                else:
+                    scene_id = self.stream_id
+
+                relationship_score = await person_api.get_user_relationship_score(
+                    user_id,
+                    scene_id=scene_id,
+                    scene_type=scene_type,
+                    platform=self.platform,
+                )
                 logger.debug(f"ChatStream {self.stream_id}: 用户关系分 = {relationship_score:.3f}")
                 return relationship_score
 
